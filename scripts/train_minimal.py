@@ -141,12 +141,32 @@ def main():
                     input_ids=input_ids,
                     pixel_values=pixel_values,
                     attention_mask=attention_mask,
-                    labels=labels
+                    labels=labels,
+                    return_grounding_scores=True
                 )
 
-                # Compute loss
-                lm_loss = outputs.loss
-                total_loss, loss_dict = criterion(lm_loss=lm_loss)
+                # Extract outputs
+                if isinstance(outputs, tuple):
+                    model_outputs, grounding_scores_dict = outputs
+                    lm_loss = model_outputs.loss
+
+                    # Aggregate grounding scores from all layers (mean across layers)
+                    if grounding_scores_dict and len(grounding_scores_dict) > 0:
+                        grounding_scores = torch.stack(
+                            list(grounding_scores_dict.values())
+                        ).mean(dim=0)  # [batch, seq_len]
+                    else:
+                        grounding_scores = None
+                else:
+                    model_outputs = outputs
+                    lm_loss = outputs.loss
+                    grounding_scores = None
+
+                # Compute total loss with grounding
+                total_loss, loss_dict = criterion(
+                    lm_loss=lm_loss,
+                    grounding_scores=grounding_scores
+                )
 
                 # Backward pass
                 optimizer.zero_grad()
