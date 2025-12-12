@@ -197,6 +197,10 @@ class GroundedCrossAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.attn_dropout = nn.Dropout(dropout)
 
+        # Containers for debug / visualization
+        self.last_attn_before_grounding: Optional[torch.Tensor] = None
+        self.last_attn_after_grounding: Optional[torch.Tensor] = None
+
         # Grounding components
         if use_grounding:
             self.grounding_head = GroundingHead(
@@ -237,6 +241,10 @@ class GroundedCrossAttention(nn.Module):
         B, T, D = text_features.shape
         P = image_features.shape[1]
 
+        # Reset cached attentions for analysis hooks
+        self.last_attn_before_grounding = None
+        self.last_attn_after_grounding = None
+
         # Project to Q, K, V
         Q = self.q_proj(text_features)  # [B, T, D]
         K = self.k_proj(image_features)  # [B, P, D]
@@ -261,6 +269,9 @@ class GroundedCrossAttention(nn.Module):
         attn_weights = F.softmax(attn_scores, dim=-1)  # [B, H, T, P]
         attn_weights = self.attn_dropout(attn_weights)
 
+        # Snapshot before any grounding scaling
+        self.last_attn_before_grounding = attn_weights.clone().detach().cpu()
+
         # Apply grounding modulation if enabled
         grounding_scores = None
         if self.use_grounding:
@@ -280,8 +291,8 @@ class GroundedCrossAttention(nn.Module):
             # Modulate attention weights
             attn_weights = attn_weights * grounding_gate
 
-            # Renormalize (crucial for stability)
-            attn_weights = attn_weights / (attn_weights.sum(dim=-1, keepdim=True) + 1e-8)
+        # Cache attention maps after grounding (or just after softmax if grounding disabled)
+        self.last_attn_after_grounding = attn_weights.clone().detach().cpu()
 
         # Apply attention to values
         attended = torch.matmul(attn_weights, V)  # [B, H, T, D/H]
